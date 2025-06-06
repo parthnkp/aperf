@@ -1,4 +1,5 @@
 use anyhow::Result;
+use aperf::monitor::{monitor, Monitor};
 use aperf::pmu::{custom_pmu, CustomPMU};
 use aperf::record::{record, Record};
 use aperf::report::{report, Report};
@@ -43,6 +44,9 @@ enum Commands {
 
     /// Create a custom PMU configuration file for use with Aperf record.
     CustomPMU(CustomPMU),
+
+    /// Monitor system metrics and automatically trigger recording when thresholds are exceeded.
+    Monitor(Monitor),
 }
 
 fn init_logger(verbose: u8, runlog: &PathBuf) -> Result<()> {
@@ -103,6 +107,7 @@ fn main() -> Result<()> {
         Commands::Record(r) => record(&r, &tmp_dir_path_buf, &runlog),
         Commands::Report(r) => report(&r, &tmp_dir_path_buf),
         Commands::CustomPMU(r) => custom_pmu(&r),
+        Commands::Monitor(m) => monitor(&m, &tmp_dir_path_buf, &runlog),
     }?;
     fs::remove_dir_all(tmp_dir_path_buf)?;
     Ok(())

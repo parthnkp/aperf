@@ -2,6 +2,7 @@
 extern crate lazy_static;
 
 pub mod data;
+pub mod monitor;
 pub mod pmu;
 pub mod record;
 pub mod report;
