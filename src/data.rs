@@ -62,7 +62,7 @@ pub struct CollectorParams {
 }
 
 impl CollectorParams {
-    fn new() -> Self {
+    pub fn new() -> Self {
         CollectorParams {
             collection_time: 0,
             elapsed_time: 0,
