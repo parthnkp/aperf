@@ -2,6 +2,7 @@
 extern crate lazy_static;
 
 pub mod data;
+pub mod monitor;
 pub mod pmu;
 pub mod record;
 pub mod report;
@@ -12,6 +13,7 @@ use chrono::prelude::*;
 use data::TimeEnum;
 use flate2::{write::GzEncoder, Compression};
 use log::{debug, error, info};
+pub use monitor::{monitor, MonitorArgs};
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::sys::{
     signal,
