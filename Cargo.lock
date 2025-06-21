@@ -134,6 +134,7 @@ dependencies = [
  "perf-event2",
  "procfs",
  "ringbuf",
+ "ringbuffer",
  "rustix 0.38.44",
  "serde",
  "serde_json",
@@ -148,6 +149,7 @@ dependencies = [
  "tdigest",
  "tempfile",
  "thiserror",
+ "time",
  "timerfd",
  "tokio",
  "vergen",
@@ -2222,6 +2224,12 @@ checksum = "f65af18d50f789e74aaf23bbb3f65dcd22a3cb6e029b5bced149f6bd57c5c2a2"
 dependencies = [
  "cache-padded",
 ]
+
+[[package]]
+name = "ringbuffer"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3df6368f71f205ff9c33c076d170dd56ebf68e8161c733c0caa07a7a5509ed53"
 
 [[package]]
 name = "rustc-demangle"

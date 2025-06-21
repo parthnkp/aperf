@@ -385,6 +385,46 @@ impl PerformanceData {
         );
         Ok(())
     }
+
+    // Add this method to get all collector names
+    pub fn get_collector_names(&self) -> Vec<String> {
+        self.collectors.keys().cloned().collect()
+    }
+    /*
+    // Add this method to prepare a single collector by name
+    pub fn prepare_data_collector(&mut self, name: &str) -> Result<()> {
+        if let Some(datatype) = self.collectors.get_mut(name) {
+            if datatype.is_static {
+                debug!("Skipping static collector '{}'", name);
+                return Ok(());
+            } else if datatype.is_profile_option
+                && !self.init_params.profile.contains_key(name) {
+                debug!("Skipping profile collector '{}' (not enabled)", name);
+                return Ok(());
+            }
+
+            let start = time::Instant::now();
+            let result = datatype.prepare_data_collector();
+            let duration = start.elapsed();
+
+            // Log detailed timing information
+            if duration.as_millis() > 100 {
+                info!("Collector '{}' preparation took {:?}", name, duration);
+
+                // Add more detailed logging for specific collectors
+                if name.contains("perf") {
+                    info!("Perf collector may be slow due to kernel symbol loading or hardware counter setup");
+                } else if name.contains("java") {
+                    info!("Java profiling may be slow due to JVM attachment");
+                }
+            }
+
+            result
+        } else {
+            Err(anyhow::anyhow!("Collector {} not found", name).into())
+        }
+    }
+    */
 }
 
 impl Default for PerformanceData {

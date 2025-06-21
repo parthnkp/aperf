@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::Args;
 use log::{debug, error, info};
 use std::path::{Path, PathBuf};
+//use std::time::{self, Instant};
 
 #[derive(Args, Debug)]
 pub struct Record {
@@ -41,6 +42,33 @@ fn prepare_data_collectors() -> Result<()> {
     PERFORMANCE_DATA.lock().unwrap().prepare_data_collectors()?;
     Ok(())
 }
+
+/*
+fn prepare_data_collectors() -> Result<()> {
+    info!("Preparing data collectors...");
+    let mut perf_data = PERFORMANCE_DATA.lock().unwrap();
+
+    // Get list of collectors for debugging
+    let collectors = perf_data.get_collector_names();
+
+    for collector in collectors {
+        let start = time::Instant::now();
+        match perf_data.prepare_data_collector(&collector) {
+            Ok(_) => {
+                let duration = start.elapsed();
+                if duration.as_millis() > 100 {
+                    info!("Collector '{}' preparation took {:?}", collector, duration);
+                }
+            },
+            Err(e) => {
+                error!("Failed to prepare collector '{}': {}", collector, e);
+            }
+        }
+    }
+
+    Ok(())
+}
+*/
 
 fn start_collection_serial() -> Result<()> {
     info!("Collecting data...");
@@ -103,11 +131,14 @@ pub fn record(record: &Record, tmp_dir: &Path, runlog: &Path) -> Result<()> {
         );
         params.perf_frequency = record.perf_frequency;
     }
-
+    //let start = Instant::now();
     PERFORMANCE_DATA.lock().unwrap().set_params(params);
     PERFORMANCE_DATA.lock().unwrap().init_collectors()?;
+    //info!("Initializing collectors took {:?}", start.elapsed());
     info!("Starting Data collection...");
+    //let start = Instant::now();
     prepare_data_collectors()?;
+    //info!("Preparing data collectors took {:?}", start.elapsed());
     collect_static_data()?;
     start_collection_serial()?;
     info!("Data collection complete.");
