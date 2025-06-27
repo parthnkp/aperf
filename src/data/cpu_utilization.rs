@@ -4,7 +4,6 @@ use crate::data::{CollectData, CollectorParams, Data, DataType, ProcessedData, T
 use crate::utils::{DataMetrics, Metric};
 use crate::visualizer::{DataVisualizer, GetData};
 use crate::{PERFORMANCE_DATA, VISUALIZATION_DATA};
-use anyhow::anyhow;
 use anyhow::Result;
 use chrono::prelude::*;
 use ctor::ctor;
@@ -409,27 +408,7 @@ impl GetData for CpuUtilization {
         }
     }
 }
-/*
-//  CPU utilization helper function
-pub fn get_cpu_util() -> Result<f64> {
 
-    let mut raw = CpuUtilizationRaw::new();
-    let params = CollectorParams::new(); // your existing init params
-    raw.collect_data(&params)?; // requires CollectData in scope
-
-    let processed = process_gathered_raw_data(Data::CpuUtilizationRaw(raw))?;
-    let util = match processed {
-        ProcessedData::CpuUtilization(u) => u,
-        _ => return Err(anyhow!("Expected CpuUtilization data")),
-    };
-
-    // 3) total.values fields are already percentages
-    let v = util.total.values;
-    // Busy = sum of non-idle percentages
-    let busy = v.user + v.nice + v.system + v.irq + v.softirq + v.iowait + v.steal;
-    Ok(busy as f64)
-}
-*/
 #[ctor]
 fn init_cpu_utilization() {
     let cpu_utilization_raw = CpuUtilizationRaw::new();

@@ -10,12 +10,12 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use crate::data::{CollectData, CollectorParams};
 use crate::record::{
-    collect_static_data, prepare_data_collectors, record as run_record, Record as RecordOpts,
+    collect_static_data, prepare_data_collectors, record as run_record, Record,
 };
 use crate::utils::DataMetrics;
 use crate::{InitParams, PERFORMANCE_DATA};
@@ -217,11 +217,12 @@ pub fn monitor(args: &MonitorArgs, tmp_dir: &Path, runlog: &Path) -> Result<()> 
 
             // now run the **fast** post-trigger record (prep was already done)
             run_record(
-                &RecordOpts {
+                &Record {
                     run_name: Some(ts.clone()),
                     interval: args.interval,
                     period: args.post,
                     profile: false,
+                    perf_frequency: 99,
                     profile_java: None,
                     pmu_config: None,
                     skip_prep: true,

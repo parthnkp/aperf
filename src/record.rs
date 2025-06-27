@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 //use std::time::{self, Instant};
 
 #[derive(Args, Debug)]
-pub struct Monitor {
+pub struct Record {
     /// Name of the run.
     #[clap(short, long, value_parser)]
     pub run_name: Option<String>,
