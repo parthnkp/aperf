@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 //use std::time::{self, Instant};
 
 #[derive(Args, Debug)]
-pub struct Record {
+pub struct Monitor {
     /// Name of the run.
     #[clap(short, long, value_parser)]
     pub run_name: Option<String>,
@@ -35,9 +35,12 @@ pub struct Record {
     /// Custom PMU config file to use.
     #[clap(long, value_parser)]
     pub pmu_config: Option<String>,
+
+    #[clap(skip)]
+    pub skip_prep: bool,
 }
 
-fn prepare_data_collectors() -> Result<()> {
+pub fn prepare_data_collectors() -> Result<()> {
     info!("Preparing data collectors...");
     PERFORMANCE_DATA.lock().unwrap().prepare_data_collectors()?;
     Ok(())
@@ -76,7 +79,7 @@ fn start_collection_serial() -> Result<()> {
     Ok(())
 }
 
-fn collect_static_data() -> Result<()> {
+pub fn collect_static_data() -> Result<()> {
     debug!("Collecting static data...");
     PERFORMANCE_DATA.lock().unwrap().collect_static_data()?;
     Ok(())
@@ -136,8 +139,11 @@ pub fn record(record: &Record, tmp_dir: &Path, runlog: &Path) -> Result<()> {
     PERFORMANCE_DATA.lock().unwrap().init_collectors()?;
     //info!("Initializing collectors took {:?}", start.elapsed());
     info!("Starting Data collection...");
+    if !record.skip_prep {
+        prepare_data_collectors()?;
+    }
     //let start = Instant::now();
-    prepare_data_collectors()?;
+    //prepare_data_collectors()?;
     //info!("Preparing data collectors took {:?}", start.elapsed());
     collect_static_data()?;
     start_collection_serial()?;

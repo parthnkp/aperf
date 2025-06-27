@@ -21,7 +21,7 @@ pub struct NetstatRaw {
 }
 
 impl NetstatRaw {
-    fn new() -> Self {
+    pub fn new() -> Self {
         NetstatRaw {
             time: TimeEnum::DateTime(Utc::now()),
             data: String::new(),

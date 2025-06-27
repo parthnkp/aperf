@@ -1,6 +1,8 @@
 use anyhow::{bail, Result};
+use bincode;
 use chrono::Utc;
 use clap::Args;
+use serde::Serialize;
 use std::{
     collections::VecDeque,
     fs,
@@ -11,19 +13,28 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::data::cpu_utilization::CpuUtilizationRaw;
-use crate::data::cpu_utilization::{get_aggregate_data, CpuData};
 use crate::data::{CollectData, CollectorParams};
-use crate::record::{record as run_record, Record as RecordOpts};
+use crate::record::{
+    collect_static_data, prepare_data_collectors, record as run_record, Record as RecordOpts,
+};
 use crate::utils::DataMetrics;
-use bincode;
+use crate::{InitParams, PERFORMANCE_DATA};
 
-/// `aperf monitor` CLI arguments
+// ——— bring in each Raw collector ———
+use crate::data::cpu_utilization::{get_aggregate_data, CpuData, CpuUtilizationRaw};
+use crate::data::diskstats::DiskstatsRaw;
+use crate::data::interrupts::InterruptDataRaw;
+use crate::data::meminfodata::MeminfoDataRaw;
+use crate::data::netstat::NetstatRaw;
+use crate::data::processes::ProcessesRaw;
+use crate::data::sysctldata::SysctlData;
+use crate::data::vmstat::VmstatRaw;
+
 #[derive(Args, Debug)]
 pub struct MonitorArgs {
     /// Trigger when CPU utilization exceeds this percentage
     #[clap(long)]
-    pub threshold: f32,
+    pub cpu_usage: f32,
 
     /// Seconds of history to keep pre-trigger
     #[clap(long)]
@@ -46,17 +57,15 @@ pub struct MonitorArgs {
     pub output: PathBuf,
 }
 
-/// Reads two raw snapshots and returns the busy‐percent using the existing pipeline.
+/// Compute busy‐percent from two `CpuUtilizationRaw` snapshots.
 fn calculate_cpu_usage(prev: &CpuUtilizationRaw, curr: &CpuUtilizationRaw) -> Result<f32> {
     let mut metrics = DataMetrics::new(String::new());
     let prev_data = crate::data::Data::CpuUtilizationRaw(prev.clone());
     let curr_data = crate::data::Data::CpuUtilizationRaw(curr.clone());
 
-    // Process into ProcessedData
     let proc_prev = crate::data::cpu_utilization::process_gathered_raw_data(prev_data)?;
     let proc_curr = crate::data::cpu_utilization::process_gathered_raw_data(curr_data)?;
 
-    // Extract totals
     let total_prev = if let crate::data::ProcessedData::CpuUtilization(u) = proc_prev {
         u.total
     } else {
@@ -68,16 +77,26 @@ fn calculate_cpu_usage(prev: &CpuUtilizationRaw, curr: &CpuUtilizationRaw) -> Re
         return Err(anyhow::anyhow!("Expected CpuUtilization data"));
     };
 
-    // Aggregate → Vec<CpuData>
     let agg_json = get_aggregate_data(vec![total_prev, total_curr], &mut metrics)?;
     let data: Vec<CpuData> = serde_json::from_str(&agg_json)?;
+    Ok(100.0 - data.last().map(|d| d.values.idle as f32).unwrap_or(0.0))
+}
 
-    // busy% = 100 - idle%
-    let busy = data
-        .last()
-        .map(|d| 100.0 - d.values.idle as f32)
-        .unwrap_or(0.0);
-    Ok(busy)
+/// Generic helper: collect, serialize, buffer one Raw collector
+fn serialize_and_buffer<R: CollectData + Serialize>(
+    raw: &mut R,
+    buf: &mut VecDeque<Vec<u8>>,
+    params: &CollectorParams,
+    capacity: usize,
+) -> Result<()> {
+    raw.collect_data(params)?;
+    let mut blob = Vec::new();
+    bincode::serialize_into(&mut blob, raw)?;
+    buf.push_back(blob);
+    if buf.len() > capacity {
+        buf.pop_front();
+    }
+    Ok(())
 }
 
 pub fn monitor(args: &MonitorArgs, tmp_dir: &Path, runlog: &Path) -> Result<()> {
@@ -93,114 +112,137 @@ pub fn monitor(args: &MonitorArgs, tmp_dir: &Path, runlog: &Path) -> Result<()> 
         );
     }
 
-    // 2) Prepare a VecDeque as a circular buffer for raw blobs
+    // 2) Pre‐warm the normal APerf collectors **once** for the post-trigger run:
+    let mut prep_params = InitParams::new(String::new());
+    prep_params.period = args.post;
+    prep_params.interval = args.interval;
+    prep_params.tmp_dir = tmp_dir.to_path_buf();
+    prep_params.runlog = runlog.to_path_buf();
+    PERFORMANCE_DATA.lock().unwrap().set_params(prep_params);
+    // create run_dir, open all .bin files
+    PERFORMANCE_DATA.lock().unwrap().init_collectors()?;
+    // heavy perf-event and procfs setup
+    prepare_data_collectors()?;
+    // static data (system_info, kernel_config, etc.)
+    collect_static_data()?;
+
+    // 3) Now set up our in-memory circular buffers
     let capacity = (args.period / args.interval) as usize;
-    let mut buf: VecDeque<Vec<u8>> = VecDeque::with_capacity(capacity);
+    let mut buf_cpu = VecDeque::with_capacity(capacity);
+    let mut buf_disk = VecDeque::with_capacity(capacity);
+    let mut buf_vm = VecDeque::with_capacity(capacity);
+    let mut buf_mem = VecDeque::with_capacity(capacity);
+    let mut buf_intr = VecDeque::with_capacity(capacity);
+    let mut buf_net = VecDeque::with_capacity(capacity);
+    let mut buf_proc = VecDeque::with_capacity(capacity);
+    let mut buf_sysctl = VecDeque::with_capacity(capacity);
 
-    // 3) Prime the “previous raw” by taking one snapshot
-    let mut prev_raw = CpuUtilizationRaw::new();
+    // 4) Instantiate and prime each Raw collector
+    let mut cpu_raw = CpuUtilizationRaw::new();
+    let mut disk_raw = DiskstatsRaw::new();
+    let mut vm_raw = VmstatRaw::new();
+    let mut mem_raw = MeminfoDataRaw::new();
+    let mut intr_raw = InterruptDataRaw::new();
+    let mut net_raw = NetstatRaw::new();
+    let mut proc_raw = ProcessesRaw::new();
+    let mut sysctl_raw = SysctlData::new();
+
     let params = CollectorParams::new();
-    prev_raw.collect_data(&params)?;
+    cpu_raw.collect_data(&params)?;
+    disk_raw.collect_data(&params)?;
+    vm_raw.collect_data(&params)?;
+    mem_raw.collect_data(&params)?;
+    intr_raw.collect_data(&params)?;
+    net_raw.collect_data(&params)?;
+    proc_raw.collect_data(&params)?;
+    sysctl_raw.collect_data(&params)?;
 
+    // For the CPU‐usage delta, keep a separate “prev” snapshot
+    let mut prev_cpu = cpu_raw.clone();
+
+    // 5) Enter the sampling loop
     loop {
-        // 4) Sleep until next tick
         thread::sleep(Duration::from_secs(args.interval));
 
-        // 5) Take a fresh raw snapshot and serialize to bytes
-        let mut curr_raw = CpuUtilizationRaw::new();
-        curr_raw.collect_data(&params)?;
-        let mut blob = Vec::new();
-        bincode::serialize_into(&mut blob, &curr_raw)?;
+        serialize_and_buffer(&mut cpu_raw, &mut buf_cpu, &params, capacity)?;
+        serialize_and_buffer(&mut disk_raw, &mut buf_disk, &params, capacity)?;
+        serialize_and_buffer(&mut vm_raw, &mut buf_vm, &params, capacity)?;
+        serialize_and_buffer(&mut mem_raw, &mut buf_mem, &params, capacity)?;
+        serialize_and_buffer(&mut intr_raw, &mut buf_intr, &params, capacity)?;
+        serialize_and_buffer(&mut net_raw, &mut buf_net, &params, capacity)?;
+        serialize_and_buffer(&mut proc_raw, &mut buf_proc, &params, capacity)?;
+        serialize_and_buffer(&mut sysctl_raw, &mut buf_sysctl, &params, capacity)?;
 
-        // 6) Push raw blob into buffer, popping the oldest if full
-        buf.push_back(blob);
-        if buf.len() > capacity {
-            buf.pop_front();
-        }
-
-        // 7) Only check once buffer is full
-        if buf.len() < capacity {
-            prev_raw = curr_raw;
-            continue;
-        }
-
-        // 8) Calculate CPU% using last two raws
-        let cpu_pct = calculate_cpu_usage(&prev_raw, &curr_raw)?;
-        prev_raw = curr_raw;
-
-        let now = chrono::Local::now();
+        // CPU% next snapshot
+        let cpu_pct = {
+            let mut curr = cpu_raw.clone();
+            curr.collect_data(&params)?;
+            let pct = calculate_cpu_usage(&prev_cpu, &curr)?;
+            prev_cpu = curr;
+            pct
+        };
         println!(
             "[{}] Current CPU utilization: {:.2}%",
-            now.format("%Y-%m-%d %H:%M:%S"),
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
             cpu_pct
         );
 
-        // 9) Threshold check
-        if cpu_pct > args.threshold {
+        // 6) On trigger, dump the pre-buffers and fire the fast post-record
+        if cpu_pct > args.cpu_usage {
             println!(
-                "Threshold exceeded! CPU: {:.2}%, Threshold: {:.2}%",
-                cpu_pct, args.threshold
+                "Threshold exceeded: {:.2}% > {:.2}%",
+                cpu_pct, args.cpu_usage
             );
-            let trigger_time = Instant::now();
-
-            // a) Drain pre-trigger blobs (the most recent `capacity` entries)
-            let drain_start = Instant::now();
-            let pre_blobs: Vec<_> = buf.iter().cloned().collect();
-            println!("Draining buffer took: {:?}", drain_start.elapsed());
-
-            // b) Timestamped run directory
-            let dir_start = Instant::now();
             let ts = Utc::now().format("%Y%m%dT%H%M%S").to_string();
             let run_dir = args.output.join(&ts);
             fs::create_dir_all(&run_dir)?;
-            println!("Creating directory took: {:?}", dir_start.elapsed());
 
-            // c) Write out the `.bin` exactly as record does
-            let write_start = Instant::now();
-            let pre_path = run_dir.join(format!("cpu_utilization_{}.bin", ts));
-            let mut f = File::create(&pre_path)?;
-            for blob in pre_blobs {
-                f.write_all(&blob)?;
+            macro_rules! dump {
+                ($buf:ident, $name:expr) => {{
+                    let mut f = File::create(run_dir.join(format!("{}_{}.bin", $name, ts)))?;
+                    for blob in &$buf {
+                        f.write_all(blob)?;
+                    }
+                }};
             }
-            println!("Writing pre-trigger data took: {:?}", write_start.elapsed());
 
-            // d) Hand off to normal post-trigger record
-            let record_start = Instant::now();
-            let opts = RecordOpts {
-                run_name: Some(ts.clone()),
-                interval: args.interval,
-                period: args.post,
-                profile: false,
-                profile_java: None,
-                pmu_config: None,
-            };
-            println!(
-                "Starting record at: {:?} after trigger",
-                record_start.elapsed()
-            );
-            run_record(&opts, tmp_dir, runlog)?;
-            println!("Record completed in: {:?}", record_start.elapsed());
+            dump!(buf_cpu, "cpu_utilization");
+            dump!(buf_disk, "disk_stats");
+            dump!(buf_vm, "vmstat");
+            dump!(buf_mem, "meminfo");
+            dump!(buf_intr, "interrupts");
+            dump!(buf_net, "netstat");
+            dump!(buf_proc, "processes");
+            dump!(buf_sysctl, "sysctl");
 
-            // e) Move the post-run folder into `<run_dir>/post`
-            let move_start = Instant::now();
-            let post_src = PathBuf::from(&ts);
-            let post_dst = run_dir.join("post");
-            if post_src.exists() {
-                fs::rename(post_src, post_dst)?;
-            }
-            println!("Moving post-run folder took: {:?}", move_start.elapsed());
+            // now run the **fast** post-trigger record (prep was already done)
+            run_record(
+                &RecordOpts {
+                    run_name: Some(ts.clone()),
+                    interval: args.interval,
+                    period: args.post,
+                    profile: false,
+                    profile_java: None,
+                    pmu_config: None,
+                    skip_prep: true,
+                },
+                tmp_dir,
+                runlog,
+            )?;
 
-            // Total time from trigger to completion
-            println!(
-                "Total time from trigger to completion: {:?}",
-                trigger_time.elapsed()
-            );
-
-            // f) Cooldown before rearming
+            // move the post-run into <run_dir>/post
+            let _ = fs::rename(ts, run_dir.join("post"));
             thread::sleep(Duration::from_secs(args.cooldown));
 
-            // g) Reset buffer
-            buf.clear();
+            // clear buffers for next round
+            buf_cpu.clear();
+            buf_disk.clear();
+            buf_vm.clear();
+            buf_mem.clear();
+            buf_intr.clear();
+            buf_net.clear();
+            buf_proc.clear();
+            buf_sysctl.clear();
         }
     }
 }

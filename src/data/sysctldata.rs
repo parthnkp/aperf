@@ -21,7 +21,7 @@ pub struct SysctlData {
 }
 
 impl SysctlData {
-    fn new() -> Self {
+    pub fn new() -> Self {
         SysctlData {
             time: TimeEnum::DateTime(Utc::now()),
             sysctl_data: BTreeMap::new(),

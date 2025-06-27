@@ -24,7 +24,7 @@ pub struct DiskstatsRaw {
 }
 
 impl DiskstatsRaw {
-    fn new() -> Self {
+    pub fn new() -> Self {
         DiskstatsRaw {
             time: TimeEnum::DateTime(Utc::now()),
             data: String::new(),

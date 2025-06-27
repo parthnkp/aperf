@@ -21,7 +21,7 @@ pub struct InterruptDataRaw {
 }
 
 impl InterruptDataRaw {
-    fn new() -> Self {
+    pub fn new() -> Self {
         InterruptDataRaw {
             time: TimeEnum::DateTime(Utc::now()),
             data: String::new(),

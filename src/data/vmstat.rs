@@ -21,7 +21,7 @@ pub struct VmstatRaw {
 }
 
 impl VmstatRaw {
-    fn new() -> Self {
+    pub fn new() -> Self {
         VmstatRaw {
             time: TimeEnum::DateTime(Utc::now()),
             data: String::new(),
