@@ -36,6 +36,26 @@ pub struct Record {
     #[clap(long, value_parser)]
     pub pmu_config: Option<String>,
 
+    /// Enable monitoring mode with trigger conditions (e.g., 'cpu > 80', 'cpu > 80 && mem > 50')
+    #[clap(long, value_parser)]
+    pub trigger_metrics: Option<String>,
+
+    /// Number of consecutive positive conditions needed to start recording
+    #[clap(long, value_parser, default_value_t = 1)]
+    pub trigger_times: u32,
+
+    /// Maximum number of recording sessions before complete exit
+    #[clap(long, value_parser, default_value_t = 10)]
+    pub trigger_count: u32,
+
+    /// Cooldown period (seconds) before re-arming after trigger
+    #[clap(long, value_parser, default_value_t = 1200)] // 20 minutes default
+    pub cooldown: u64,
+
+    /// Base output directory for triggered runs
+    #[clap(long, value_parser)]
+    pub output: Option<PathBuf>,
+
     #[clap(skip)]
     pub skip_prep: bool,
 }
@@ -45,33 +65,6 @@ pub fn prepare_data_collectors() -> Result<()> {
     PERFORMANCE_DATA.lock().unwrap().prepare_data_collectors()?;
     Ok(())
 }
-
-/*
-fn prepare_data_collectors() -> Result<()> {
-    info!("Preparing data collectors...");
-    let mut perf_data = PERFORMANCE_DATA.lock().unwrap();
-
-    // Get list of collectors for debugging
-    let collectors = perf_data.get_collector_names();
-
-    for collector in collectors {
-        let start = time::Instant::now();
-        match perf_data.prepare_data_collector(&collector) {
-            Ok(_) => {
-                let duration = start.elapsed();
-                if duration.as_millis() > 100 {
-                    info!("Collector '{}' preparation took {:?}", collector, duration);
-                }
-            },
-            Err(e) => {
-                error!("Failed to prepare collector '{}': {}", collector, e);
-            }
-        }
-    }
-
-    Ok(())
-}
-*/
 
 fn start_collection_serial() -> Result<()> {
     info!("Collecting data...");
@@ -86,6 +79,12 @@ pub fn collect_static_data() -> Result<()> {
 }
 
 pub fn record(record: &Record, tmp_dir: &Path, runlog: &Path) -> Result<()> {
+    // Check if this is a trigger-based monitoring mode
+    if let Some(trigger_expr) = &record.trigger_metrics {
+        return crate::monitor::monitor_with_triggers(record, trigger_expr, tmp_dir, runlog);
+    }
+
+    // Original record functionality for non-trigger mode
     let mut run_name = String::new();
     if record.period == 0 {
         error!("Collection period cannot be 0.");

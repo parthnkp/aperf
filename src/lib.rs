@@ -6,6 +6,7 @@ pub mod monitor;
 pub mod pmu;
 pub mod record;
 pub mod report;
+pub mod trigger_parser;
 pub mod utils;
 pub mod visualizer;
 use anyhow::Result;
@@ -384,11 +385,6 @@ impl PerformanceData {
             self.init_params.dir_name, archive_path
         );
         Ok(())
-    }
-
-    // Add this method to get all collector names
-    pub fn get_collector_names(&self) -> Vec<String> {
-        self.collectors.keys().cloned().collect()
     }
 }
 
